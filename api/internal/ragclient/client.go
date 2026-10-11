@@ -12,13 +12,29 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
+	"google.golang.org/api/idtoken"
 )
 
 type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client // short requests
-	stream  *http.Client // long-lived SSE streams (no overall timeout; ctx bounds them)
+	stream  *http.Client // long-lived SSE streams (bounded by the timeout and ctx)
+	idToken oauth2.TokenSource
+}
+
+// WithIDToken makes the client also send a Google-signed ID token for the given audience
+// (the rag service URL) in X-Serverless-Authorization, so rag can be deployed with
+// Cloud Run IAM (--no-allow-unauthenticated) in addition to the shared bearer token.
+func (c *Client) WithIDToken(ctx context.Context, audience string) error {
+	ts, err := idtoken.NewTokenSource(ctx, audience)
+	if err != nil {
+		return fmt.Errorf("id token source: %w", err)
+	}
+	c.idToken = ts
+	return nil
 }
 
 func New(baseURL, token string, timeout time.Duration) *Client {
@@ -80,6 +96,13 @@ func (c *Client) do(ctx context.Context, hc *http.Client, method, path string, b
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.idToken != nil {
+		tok, err := c.idToken.Token()
+		if err != nil {
+			return nil, fmt.Errorf("id token: %w", err)
+		}
+		req.Header.Set("X-Serverless-Authorization", "Bearer "+tok.AccessToken)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

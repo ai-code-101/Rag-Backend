@@ -123,9 +123,15 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		return err
 	}
 
+	rag := ragclient.New(cfg.RAGURL, cfg.RAGToken, cfg.RAGTimeout)
+	if cfg.RAGIDTokenAud != "" {
+		if err := rag.WithIDToken(ctx, cfg.RAGIDTokenAud); err != nil {
+			return err
+		}
+	}
 	router, err := httpapi.NewRouter(httpapi.Deps{
 		Config: cfg, DB: db, Auth: authSvc, Store: bots.NewStore(db, cfg.MaxBotsPerUser, cfg.MaxDocsPerBot),
-		Objects: objects, RAG: ragclient.New(cfg.RAGURL, cfg.RAGToken, cfg.RAGTimeout), Limiter: limiter, Log: log,
+		Objects: objects, RAG: rag, Limiter: limiter, Log: log,
 	})
 	if err != nil {
 		return err

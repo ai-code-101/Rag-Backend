@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: Go vet + tests
+        working-directory: api
+        run: |
+          test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+          go vet ./...
+          GIN_MODE=release go test -race ./...
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: rag/requirements*.txt
+      - name: Python lint + tests
+        working-directory: rag
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+          .venv/bin/ruff check .
+          TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres TOKENIZER=heuristic .venv/bin/pytest -q
+
+      - name: End-to-end (upload → ingest → chat)
+        run: ADMIN_DATABASE_URL="$TEST_DATABASE_URL" ./scripts/integration.sh

@@ -1,0 +1,102 @@
+# Local development stack.
+#
+#   cp .env.example .env        # then fill in API keys (or use the offline settings)
+#   docker compose up --build   # db + migrations + api + rag
+#   docker compose --profile frontend up --build   # also builds ../Rag-Frontend/web
+#   docker compose --profile redis up              # shared cache / rate limits
+#
+# Uploaded files live in a shared named volume here; in production they go to GCS.
+name: peakchat
+
+x-shared-env: &shared-env
+  APP_ENV: development
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+  RAG_INTERNAL_TOKEN: ${RAG_INTERNAL_TOKEN}
+  STORAGE_DRIVER: local
+  LOCAL_STORAGE_DIR: /data/uploads
+  REDIS_URL: ${REDIS_URL:-}
+
+services:
+  db:
+    image: pgvector/pgvector:pg16  # ships pgvector >= 0.8 (iterative HNSW scans)
+    environment:
+      POSTGRES_USER: peakchat
+      POSTGRES_PASSWORD: peakchat
+      POSTGRES_DB: peakchat
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peakchat -d peakchat"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Makes the shared upload volume writable by the api (uid 65532) and readable by rag (uid 10001).
+  uploads-init:
+    image: busybox:1.36
+    command: ["sh", "-c", "chmod 0777 /data/uploads"]
+    volumes: [uploads:/data/uploads]
+
+  migrate:
+    build: ./api
+    command: ["migrate"]
+    env_file: .env
+    environment:
+      <<: *shared-env
+      DATABASE_URL: postgres://peakchat:peakchat@db:5432/peakchat?sslmode=disable
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: ./api
+    env_file: .env
+    environment:
+      <<: *shared-env
+      DATABASE_URL: postgres://peakchat:peakchat@db:5432/peakchat?sslmode=disable
+      MIGRATE_ON_START: "false"
+      RAG_URL: http://rag:8000
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports: ["8080:8080"]
+    volumes: [uploads:/data/uploads]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      uploads-init: { condition: service_completed_successfully }
+
+  rag:
+    build: ./rag
+    env_file: .env
+    environment:
+      <<: *shared-env
+      DATABASE_URL: postgresql://peakchat:peakchat@db:5432/peakchat
+    # Internal only: no published port. Exposed to the api on the compose network.
+    expose: ["8000"]
+    volumes: [uploads:/data/uploads]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      uploads-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    profiles: [redis]
+    ports: ["6379:6379"]
+
+  web:
+    profiles: [frontend]
+    build:
+      context: ${FRONTEND_DIR:-../Rag-Frontend}/web
+    environment:
+      API_INTERNAL_URL: http://api:8080
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080}
+      PUBLIC_WEB_URL: ${WEB_ORIGIN:-http://localhost:3000}
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  uploads:

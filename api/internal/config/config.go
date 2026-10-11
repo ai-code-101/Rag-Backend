@@ -62,6 +62,7 @@ type Config struct {
 	RAGURL         string
 	RAGToken       string
 	RAGTimeout     time.Duration
+	RAGIDTokenAud  string // set to the rag URL to send Cloud Run IAM ID tokens
 	HistoryTurns   int
 	AllowedModels  []string
 	DefaultModel   string
@@ -114,6 +115,7 @@ func Load() (*Config, error) {
 		RAGURL:          strings.TrimRight(getEnv("RAG_URL", "http://localhost:8000"), "/"),
 		RAGToken:        os.Getenv("RAG_INTERNAL_TOKEN"),
 		RAGTimeout:      getDuration("RAG_TIMEOUT", 120*time.Second),
+		RAGIDTokenAud:   os.Getenv("RAG_ID_TOKEN_AUDIENCE"),
 		HistoryTurns:    getInt("CHAT_HISTORY_TURNS", 6),
 		AllowedModels:   getList("ALLOWED_MODELS", []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}),
 		DefaultModel:    getEnv("DEFAULT_MODEL", "claude-opus-5-5"),
