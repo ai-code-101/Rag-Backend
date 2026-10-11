@@ -61,6 +61,16 @@ func (h *Handler) setRefreshCookie(c *gin.Context, value string, expires time.Ti
 		Name: h.cfg.CookieName, Value: value, Path: h.cfg.CookiePath, Domain: h.cfg.CookieDomain,
 		MaxAge: maxAge, HttpOnly: true, Secure: h.cfg.CookieSecure, SameSite: ss,
 	})
+	// Readable hint (no secret) so the dashboard only attempts a session refresh when one
+	// may exist, sparing anonymous visitors a guaranteed-401 request.
+	hint := "1"
+	if value == "" {
+		hint = ""
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: "pc_has_session", Value: hint, Path: "/", Domain: h.cfg.CookieDomain,
+		MaxAge: maxAge, Secure: h.cfg.CookieSecure, SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func (h *Handler) writeSession(c *gin.Context, s *auth.Session) {

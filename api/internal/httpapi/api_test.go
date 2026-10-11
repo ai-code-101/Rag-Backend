@@ -216,6 +216,9 @@ func TestAuthHTTPFlow(t *testing.T) {
 		}
 	}
 	rt := strings.SplitN(strings.TrimPrefix(cookie, "__Secure-pc_rt="), ";", 2)[0]
+	if all := strings.Join(r.header.Values("Set-Cookie"), "\n"); !strings.Contains(all, "pc_has_session=1") || strings.Contains(strings.Split(all, "pc_has_session")[1], "HttpOnly") {
+		t.Errorf("session hint cookie missing or not readable: %s", all)
+	}
 
 	// Refresh requires the CSRF header.
 	if r := h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-pc_rt=" + rt}); r.status != http.StatusForbidden {
@@ -386,6 +389,9 @@ func TestWidgetOriginAndChat(t *testing.T) {
 		if !strings.Contains(stream, want) {
 			t.Errorf("stream missing %q:\n%s", want, stream)
 		}
+	}
+	if strings.Contains(stream, "input_tokens") {
+		t.Error("token usage must not be exposed to widget visitors")
 	}
 	req := <-h.ragReq
 	if req.Message != "When do you open?" || req.BotID != bot["id"] || req.Model != "claude-opus-5-5" {

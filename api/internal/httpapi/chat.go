@@ -214,7 +214,11 @@ func (h *Handler) streamChat(c *gin.Context, bot *models.Bot, conv *models.Conve
 	}
 	_ = sdb.Model(conv).Update("last_message_at", time.Now().UTC()).Error
 	if ctx.Err() == nil {
-		_ = w.send("done", gin.H{"message_id": assistantID, "cached": usage.Cached})
+		done := gin.H{"message_id": assistantID, "cached": usage.Cached}
+		if conv.Channel == models.ChannelTest {
+			done["usage"] = usage // token counts are shown to the bot owner only, never to visitors
+		}
+		_ = w.send("done", done)
 	}
 }
 

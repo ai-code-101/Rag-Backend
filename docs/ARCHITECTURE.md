@@ -95,9 +95,10 @@ Rag-Frontend/
 │   │   ├── dashboard/                bot list, create
 │   │   ├── dashboard/bots/[id]/      knowledge | instructions | widget | test tabs
 │   │   ├── widget/[publicKey]/       chat UI rendered inside the iframe
+│   │   ├── api/[...path]/route.ts    same-origin streaming proxy to the API
 │   │   └── widget.js/route.ts        serves the loader with runtime config
-│   ├── lib/                          api client, auth context, SSE reader
-│   ├── middleware.ts                 CSP frame-ancestors for /widget/*
+│   ├── lib/                          api client, auth context, SSE reader, markdown
+│   ├── proxy.ts                      security headers; CSP frame-ancestors for /widget/*
 │   └── Dockerfile
 └── widget/
     ├── src/loader.js                 vanilla JS loader (no framework)
@@ -156,8 +157,10 @@ in sync, and the rag service only inserts `content`, `metadata` and `embedding`.
   opaque refresh token (30 days) in an `httpOnly; Secure; SameSite=Strict`
   cookie scoped to `/api/v1/auth`. Every refresh rotates. Presenting an already
   rotated token outside a 15-second race window revokes the whole family.
-* The dashboard calls the API through a same-origin Next.js rewrite (`/api/*`),
-  so the refresh cookie is first-party everywhere, including on `*.run.app`.
+* The dashboard calls the API through a same-origin Next.js proxy route (`/api/*`),
+  so the refresh cookie is first-party everywhere, including on `*.run.app`. A readable
+  `pc_has_session=1` hint cookie (no secret) lets the dashboard skip the refresh call for
+  visitors who have no session.
 * Rate limits (per IP and per email) on every auth route. Bot/document/config
   queries always include `owner_id = <jwt sub>`; cross-tenant IDs return 404.
 
