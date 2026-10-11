@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local data
+data/
+api/data/
+rag/data/
+*.log
+
+# Go
+api/bin/
+*.test
+coverage.out
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
