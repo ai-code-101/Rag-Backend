@@ -1,0 +1,42 @@
+[project]
+name = "peakchat-rag"
+version = "1.0.0"
+description = "Internal RAG service: ingestion, hybrid retrieval and LLM streaming"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30",
+    "asyncpg>=0.30",
+    "pgvector>=0.4",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "httpx>=0.27",
+    "anthropic>=1.13,<2",
+    "pypdf>=5",
+    "python-docx>=1.1",
+    "selectolax>=0.3.21",
+    "tiktoken>=0.8",
+    "google-cloud-storage>=2.18",
+    "redis>=5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
+ignore = ["S101", "S608", "B008", "ASYNC109"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B"]
+"app/prompt.py" = ["E501"]  # prompt text reads better unwrapped
