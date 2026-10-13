@@ -81,11 +81,18 @@ func (l *Local) Put(_ context.Context, key string, r io.Reader, _ string) (PutRe
 	if err != nil {
 		return PutResult{}, err
 	}
+	// Group-readable: the rag service reads these files and, in docker compose, runs as a
+	// different user that shares the api's group (group_add in docker-compose.yml).
 	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 		return PutResult{}, err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(p), ".upload-*")
 	if err != nil {
+		return PutResult{}, err
+	}
+	if err := tmp.Chmod(0o640); err != nil { // CreateTemp creates files as 0600
+		tmp.Close()
+		os.Remove(tmp.Name())
 		return PutResult{}, err
 	}
 	hr := newHashingReader(r)
