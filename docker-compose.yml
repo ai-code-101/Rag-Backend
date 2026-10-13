@@ -60,6 +60,7 @@ services:
     environment:
       <<: *shared-env
       DATABASE_URL: postgres://horizonvalley:horizonvalley@db:5432/horizonvalley?sslmode=disable
+      PORT: "8080"
       MIGRATE_ON_START: "false"
       RAG_URL: http://rag:8000
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
@@ -78,6 +79,8 @@ services:
     environment:
       <<: *shared-env
       DATABASE_URL: postgresql://horizonvalley:horizonvalley@db:5432/horizonvalley
+      # Pinned: PORT in .env is the api's, and the api reaches rag on 8000 (RAG_URL).
+      PORT: "8000"
     # Internal only: no published port. Exposed to the api on the compose network.
     expose: ["8000"]
     # The api's group (distroless "nonroot"), so rag can read the files the api uploads.
