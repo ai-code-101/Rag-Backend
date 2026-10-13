@@ -19,6 +19,7 @@ x-shared-env: &shared-env
 services:
   db:
     image: pgvector/pgvector:pg16  # ships pgvector >= 0.8 (iterative HNSW scans)
+    restart: unless-stopped
     environment:
       POSTGRES_USER: horizonvalley
       POSTGRES_PASSWORD: horizonvalley
@@ -52,6 +53,9 @@ services:
 
   api:
     build: ./api
+    # Long-running services come back after a crash or reboot (until `docker compose down`
+    # or `docker compose stop`). The one-shot migrate/uploads-init jobs don't restart.
+    restart: unless-stopped
     env_file: .env
     environment:
       <<: *shared-env
@@ -69,6 +73,7 @@ services:
 
   rag:
     build: ./rag
+    restart: unless-stopped
     env_file: .env
     environment:
       <<: *shared-env
@@ -89,11 +94,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     profiles: [redis]
     ports: ["6379:6379"]
 
   web:
     profiles: [frontend]
+    restart: unless-stopped
     build:
       context: ${FRONTEND_DIR:-../Rag-Frontend}/web
     environment:
