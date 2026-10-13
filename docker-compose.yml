@@ -58,7 +58,8 @@ services:
       RAG_URL: http://rag:8000
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-    ports: ["8080:8080"]
+    # Host port is configurable in case something else already uses 8080 (API_PORT=8081 in .env).
+    ports: ["${API_PORT:-8080}:8080"]
     volumes: [uploads:/data/uploads]
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -93,7 +94,7 @@ services:
       context: ${FRONTEND_DIR:-../Rag-Frontend}/web
     environment:
       API_INTERNAL_URL: http://api:8080
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:${API_PORT:-8080}}
       PUBLIC_WEB_URL: ${WEB_ORIGIN:-http://localhost:3000}
     ports: ["3000:3000"]
     depends_on: [api]
