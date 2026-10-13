@@ -1,6 +1,8 @@
-"""OpenAI-compatible chat completions (OpenAI, Together, Groq, vLLM, Ollama, …).
+"""OpenAI-compatible chat completions.
 
-Bots select these models with an ``openai:`` prefix, e.g. ``openai:gpt-4.1-mini``.
+The same client serves every OpenAI-style API; the bot's model prefix picks the account:
+``openai:gpt-4.1-mini`` (OpenAI or any OPENAI_BASE_URL such as Groq, vLLM, Ollama) and
+``openrouter:openai/gpt-4o-mini`` (OpenRouter).
 """
 
 from __future__ import annotations
@@ -13,16 +15,20 @@ import httpx
 from app.llm.base import GenerateRequest, LLMError, Usage
 
 PREFIX = "openai:"
+OPENROUTER_PREFIX = "openrouter:"
 
 
 class OpenAICompatProvider:
-    def __init__(self, api_key: str, base_url: str, timeout: float = 90.0):
+    def __init__(self, api_key: str, base_url: str, prefix: str = PREFIX, extra_headers: dict[str, str] | None = None,
+                 timeout: float = 90.0):
         self._url = base_url.rstrip("/") + "/chat/completions"
+        self._prefix = prefix
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._headers.update({k: v for k, v in (extra_headers or {}).items() if v})
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0))
 
     async def stream(self, req: GenerateRequest) -> AsyncIterator[str | Usage]:
-        model = req.model.removeprefix(PREFIX)
+        model = req.model.removeprefix(self._prefix)
         # Static system text first: OpenAI-style providers cache identical prompt prefixes automatically.
         messages = [{"role": "system", "content": req.rules + "\n\n" + req.bot_block}, *req.messages]
         payload = {
@@ -45,7 +51,12 @@ class OpenAICompatProvider:
                     data = line[5:].strip()
                     if data == "[DONE]":
                         break
-                    chunk = json.loads(data)
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("error"):  # e.g. OpenRouter reports upstream failures mid-stream
+                        raise LLMError(f"model error: {str(chunk['error'].get('message', 'unknown'))[:200]}")
                     for choice in chunk.get("choices") or []:
                         text = (choice.get("delta") or {}).get("content")
                         if text:

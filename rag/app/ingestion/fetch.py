@@ -20,7 +20,7 @@ import httpx
 
 ALLOWED_PORTS = {None, 80, 443, 8080, 8443}
 MAX_REDIRECTS = 5
-USER_AGENT = "PeakChatBot/1.0 (+knowledge-base import)"
+USER_AGENT = "HorizonValleyBot/1.0 (+knowledge-base import)"
 
 
 class FetchError(Exception):

@@ -119,8 +119,7 @@ func dashboardCORS(origins []string) gin.HandlerFunc {
 	}
 }
 
-// requireAuth validates the bearer access token. Tokens are only ever issued to verified
-// users, and the "ev" claim is checked as defence in depth.
+// requireAuth validates the bearer access token.
 func requireAuth(tokens *auth.TokenIssuer) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
@@ -132,10 +131,6 @@ func requireAuth(tokens *auth.TokenIssuer) gin.HandlerFunc {
 		claims, err := tokens.Parse(raw)
 		if err != nil {
 			fail(c, http.StatusUnauthorized, "unauthorized", "Authentication required.")
-			return
-		}
-		if !claims.Verified {
-			fail(c, http.StatusForbidden, "email_unverified", "Verify your email first.")
 			return
 		}
 		c.Set(ctxUserID, uuid.MustParse(claims.Subject))

@@ -38,7 +38,7 @@ async def database_url():
     base = os.environ.get("TEST_DATABASE_URL")
     if not base:
         pytest.skip("TEST_DATABASE_URL not set")
-    name = "pc_rag_test_" + secrets.token_hex(4)
+    name = "hv_rag_test_" + secrets.token_hex(4)
     admin = await asyncpg.connect(base)
     await admin.execute(f"CREATE DATABASE {name}")
     await admin.close()
@@ -63,7 +63,7 @@ async def pool(database_url):
 async def make_bot(pool) -> str:
     async with pool.acquire() as conn:
         uid = await conn.fetchval(
-            "INSERT INTO users (email, password_hash, email_verified) VALUES ($1, 'x', true) RETURNING id",
+            "INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id",
             f"{uuid.uuid4().hex}@example.com",
         )
         bid = await conn.fetchval(

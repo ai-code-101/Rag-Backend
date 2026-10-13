@@ -10,18 +10,15 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/ai-code-101/rag-backend/api/internal/auth"
 	"github.com/ai-code-101/rag-backend/api/internal/bots"
 	"github.com/ai-code-101/rag-backend/api/internal/config"
 	"github.com/ai-code-101/rag-backend/api/internal/httpapi"
-	pcmail "github.com/ai-code-101/rag-backend/api/internal/mail"
 	"github.com/ai-code-101/rag-backend/api/internal/models"
 	"github.com/ai-code-101/rag-backend/api/internal/ragclient"
 	"github.com/ai-code-101/rag-backend/api/internal/ratelimit"
@@ -29,40 +26,18 @@ import (
 	"github.com/ai-code-101/rag-backend/api/internal/testutil"
 )
 
-const webOrigin = "https://app.peakchat.test"
-
-type mailbox struct {
-	mu   sync.Mutex
-	msgs []pcmail.Message
-}
-
-func (m *mailbox) Enqueue(msg pcmail.Message) error {
-	m.mu.Lock()
-	m.msgs = append(m.msgs, msg)
-	m.mu.Unlock()
-	return nil
-}
-
-func (m *mailbox) code(t *testing.T) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.msgs) == 0 {
-		t.Fatal("no mail")
-	}
-	return regexp.MustCompile(`\b\d{6}\b`).FindString(m.msgs[len(m.msgs)-1].Text)
-}
+const webOrigin = "https://app.horizonvalley.test"
 
 type harness struct {
 	t      *testing.T
 	srv    *httptest.Server
 	db     *gorm.DB
-	mail   *mailbox
 	ragReq chan ragclient.ChatRequest
 }
 
 func newHarness(t *testing.T) *harness {
 	db, _ := testutil.NewDB(t)
-	h := &harness{t: t, db: db, mail: &mailbox{}, ragReq: make(chan ragclient.ChatRequest, 10)}
+	h := &harness{t: t, db: db, ragReq: make(chan ragclient.ChatRequest, 10)}
 
 	// Fake rag service: echoes a fixed answer as SSE and reports usage.
 	rag := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,15 +64,15 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(rag.Close)
 
 	cfg := &config.Config{
-		Env: "test", WebOrigin: webOrigin, CookieName: "__Secure-pc_rt", CookiePath: "/api/v1/auth",
+		Env: "test", WebOrigin: webOrigin, CookieName: "__Secure-hv_rt", CookiePath: "/api/v1/auth",
 		CookieSecure: true, CookieSameSite: "strict", MaxUploadBytes: 1 << 20, MaxTextBytes: 64 << 10,
 		HistoryTurns: 6, AllowedModels: []string{"claude-opus-5-5", "claude-haiku-5-5"}, DefaultModel: "claude-opus-5-5",
 		MaxBotsPerUser: 3, MaxDocsPerBot: 10,
 	}
 	svc, err := auth.NewService(auth.Options{
 		DB: db, Hasher: auth.NewHasher(auth.Argon2Params{Memory: 1024, Time: 1, Threads: 1, SaltLen: 16, KeyLen: 32}, 4),
-		Tokens:    auth.NewTokenIssuer([]byte(strings.Repeat("j", 32)), "test", 15*time.Minute),
-		OTPPepper: []byte(strings.Repeat("p", 32)), Mailer: h.mail, AppName: "PeakChat", RefreshTTL: time.Hour, Log: testutil.Logger(),
+		Tokens:     auth.NewTokenIssuer([]byte(strings.Repeat("j", 32)), "test", 15*time.Minute),
+		RefreshTTL: time.Hour, Log: testutil.Logger(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,16 +131,12 @@ func (h *harness) do(method, path, token string, body any, hdr map[string]string
 	return resp{status: res.StatusCode, body: b, header: res.Header}
 }
 
-// account signs up and verifies a user and returns its access token.
+// account signs up a user and returns its access token.
 func (h *harness) account(email string) string {
 	h.t.Helper()
-	creds := map[string]string{"email": email, "password": "password-123"}
-	if r := h.do("POST", "/v1/auth/signup", "", creds, nil); r.status != http.StatusAccepted {
+	r := h.do("POST", "/v1/auth/signup", "", map[string]string{"email": email, "password": "password-123"}, nil)
+	if r.status != http.StatusCreated {
 		h.t.Fatalf("signup: %d %s", r.status, r.body)
-	}
-	r := h.do("POST", "/v1/auth/verify-email", "", map[string]string{"email": email, "password": "password-123", "code": h.mail.code(h.t)}, nil)
-	if r.status != http.StatusOK {
-		h.t.Fatalf("verify: %d %s", r.status, r.body)
 	}
 	var s struct {
 		AccessToken string `json:"access_token"`
@@ -187,17 +158,10 @@ func (h *harness) createBot(token string, origins []string) map[string]any {
 
 func TestAuthHTTPFlow(t *testing.T) {
 	h := newHarness(t)
-	// Signup responses are identical for new and existing addresses.
-	first := h.do("POST", "/v1/auth/signup", "", map[string]string{"email": "a@example.com", "password": "password-123"}, nil)
 	h.account("b@example.com")
-	again := h.do("POST", "/v1/auth/signup", "", map[string]string{"email": "b@example.com", "password": "password-123"}, nil)
-	if first.status != again.status || string(first.body) != string(again.body) {
-		t.Fatalf("signup leaks account existence: %s vs %s", first.body, again.body)
-	}
-	// Login for the unverified account returns verification_required and no cookie.
-	r := h.do("POST", "/v1/auth/login", "", map[string]string{"email": "a@example.com", "password": "password-123"}, nil)
-	if r.status != http.StatusAccepted || r.header.Get("Set-Cookie") != "" {
-		t.Fatalf("unverified login: %d %s", r.status, r.body)
+	// Signing up twice with the same address is refused.
+	if r := h.do("POST", "/v1/auth/signup", "", map[string]string{"email": "B@example.com", "password": "password-123"}, nil); r.status != http.StatusConflict {
+		t.Fatalf("duplicate signup: %d %s", r.status, r.body)
 	}
 	bad := h.do("POST", "/v1/auth/login", "", map[string]string{"email": "nobody@example.com", "password": "password-123"}, nil)
 	wrong := h.do("POST", "/v1/auth/login", "", map[string]string{"email": "b@example.com", "password": "nope-12345"}, nil)
@@ -205,29 +169,29 @@ func TestAuthHTTPFlow(t *testing.T) {
 		t.Fatalf("login errors must be generic: %s / %s", bad.body, wrong.body)
 	}
 
-	r = h.do("POST", "/v1/auth/login", "", map[string]string{"email": "b@example.com", "password": "password-123"}, nil)
+	r := h.do("POST", "/v1/auth/login", "", map[string]string{"email": "b@example.com", "password": "password-123"}, nil)
 	if r.status != http.StatusOK {
 		t.Fatalf("login: %d %s", r.status, r.body)
 	}
 	cookie := r.header.Get("Set-Cookie")
-	for _, attr := range []string{"__Secure-pc_rt=", "HttpOnly", "Secure", "SameSite=Strict", "Path=/api/v1/auth"} {
+	for _, attr := range []string{"__Secure-hv_rt=", "HttpOnly", "Secure", "SameSite=Strict", "Path=/api/v1/auth"} {
 		if !strings.Contains(cookie, attr) {
 			t.Errorf("refresh cookie missing %q: %s", attr, cookie)
 		}
 	}
-	rt := strings.SplitN(strings.TrimPrefix(cookie, "__Secure-pc_rt="), ";", 2)[0]
-	if all := strings.Join(r.header.Values("Set-Cookie"), "\n"); !strings.Contains(all, "pc_has_session=1") || strings.Contains(strings.Split(all, "pc_has_session")[1], "HttpOnly") {
+	rt := strings.SplitN(strings.TrimPrefix(cookie, "__Secure-hv_rt="), ";", 2)[0]
+	if all := strings.Join(r.header.Values("Set-Cookie"), "\n"); !strings.Contains(all, "hv_has_session=1") || strings.Contains(strings.Split(all, "hv_has_session")[1], "HttpOnly") {
 		t.Errorf("session hint cookie missing or not readable: %s", all)
 	}
 
 	// Refresh requires the CSRF header.
-	if r := h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-pc_rt=" + rt}); r.status != http.StatusForbidden {
+	if r := h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-hv_rt=" + rt}); r.status != http.StatusForbidden {
 		t.Fatalf("refresh without CSRF header: %d", r.status)
 	}
-	if r := h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-pc_rt=" + rt, "X-Requested-With": "peakchat", "Origin": "https://evil.example"}); r.status != http.StatusForbidden {
+	if r := h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-hv_rt=" + rt, "X-Requested-With": "horizonvalley", "Origin": "https://evil.example"}); r.status != http.StatusForbidden {
 		t.Fatalf("refresh from foreign origin: %d", r.status)
 	}
-	r = h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-pc_rt=" + rt, "X-Requested-With": "peakchat", "Origin": webOrigin})
+	r = h.do("POST", "/v1/auth/refresh", "", nil, map[string]string{"Cookie": "__Secure-hv_rt=" + rt, "X-Requested-With": "horizonvalley", "Origin": webOrigin})
 	if r.status != http.StatusOK {
 		t.Fatalf("refresh: %d %s", r.status, r.body)
 	}
@@ -240,14 +204,6 @@ func TestAuthHTTPFlow(t *testing.T) {
 	}
 	if me := h.do("GET", "/v1/me", "garbage", nil, nil); me.status != http.StatusUnauthorized {
 		t.Fatalf("bad token accepted: %d", me.status)
-	}
-}
-
-func TestUnverifiedTokenCannotCreateBots(t *testing.T) {
-	h := newHarness(t)
-	tok, _ := auth.NewTokenIssuer([]byte(strings.Repeat("j", 32)), "test", time.Minute).Issue(uuid.New(), false, time.Now())
-	if r := h.do("POST", "/v1/bots", tok, map[string]any{"name": "x"}, nil); r.status != http.StatusForbidden {
-		t.Fatalf("expected 403 for unverified token, got %d", r.status)
 	}
 }
 

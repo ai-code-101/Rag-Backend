@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADMIN_DATABASE_URL="${ADMIN_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable}"
-DB_NAME="pc_e2e_$RANDOM$RANDOM"
+DB_NAME="hv_e2e_$RANDOM$RANDOM"
 BASE="${ADMIN_DATABASE_URL%%\?*}"
 DATABASE_URL="${BASE%/*}/${DB_NAME}?sslmode=disable"
 RAG_PORT="${RAG_PORT:-18000}"
@@ -17,7 +17,7 @@ STORAGE_DIR="$(mktemp -d)"
 DIM=256
 
 cleanup() {
-  [[ -n "${RAG_PID:-}" ]] && kill "$RAG_PID" 2>/dev/null || true
+  [[ -n "${RAG_PID:-}" ]] && { kill "$RAG_PID" 2>/dev/null; wait "$RAG_PID" 2>/dev/null; } || true
   psql "$ADMIN_DATABASE_URL" -qc "DROP DATABASE IF EXISTS $DB_NAME WITH (FORCE)" >/dev/null 2>&1 || true
   rm -rf "$STORAGE_DIR"
 }

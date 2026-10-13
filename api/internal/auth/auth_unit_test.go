@@ -8,8 +8,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-
-	"github.com/ai-code-101/rag-backend/api/internal/models"
 )
 
 var fastArgon = Argon2Params{Memory: 1024, Time: 1, Threads: 1, SaltLen: 16, KeyLen: 32}
@@ -55,112 +53,21 @@ func TestValidatePassword(t *testing.T) {
 	}
 }
 
-func TestGenerateOTP(t *testing.T) {
-	seen := map[string]bool{}
-	for i := 0; i < 500; i++ {
-		c, err := GenerateOTP()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(c) != 6 || strings.Trim(c, "0123456789") != "" {
-			t.Fatalf("bad code %q", c)
-		}
-		seen[c] = true
-	}
-	if len(seen) < 490 {
-		t.Fatalf("codes are not random enough: %d unique of 500", len(seen))
-	}
-}
-
-func TestHashOTPBindsUserPurposeAndPepper(t *testing.T) {
-	p := []byte(strings.Repeat("k", 32))
-	base := HashOTP(p, "u1", models.PurposeVerifyEmail, "123456")
-	if base == HashOTP(p, "u2", models.PurposeVerifyEmail, "123456") {
-		t.Error("hash must depend on user")
-	}
-	if base == HashOTP(p, "u1", models.PurposeResetPassword, "123456") {
-		t.Error("hash must depend on purpose")
-	}
-	if base == HashOTP([]byte(strings.Repeat("z", 32)), "u1", models.PurposeVerifyEmail, "123456") {
-		t.Error("hash must depend on pepper")
-	}
-	if strings.Contains(base, "123456") {
-		t.Error("hash leaks the code")
-	}
-}
-
-func TestCheckOTP(t *testing.T) {
-	pepper := []byte(strings.Repeat("p", 32))
-	uid := uuid.New()
-	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	fresh := func() *models.EmailOTP {
-		return &models.EmailOTP{
-			UserID: uid, Purpose: models.PurposeLogin, ExpiresAt: now.Add(OTPTTL),
-			CodeHash: HashOTP(pepper, uid.String(), models.PurposeLogin, "424242"), CreatedAt: now,
-		}
-	}
-	consumed := fresh()
-	consumed.ConsumedAt = &now
-	expired := fresh()
-	expired.ExpiresAt = now
-	exhausted := fresh()
-	exhausted.Attempts = OTPMaxAttempts
-	almost := fresh()
-	almost.Attempts = OTPMaxAttempts - 1
-	otherPurpose := fresh()
-	otherPurpose.Purpose = models.PurposeResetPassword
-
-	cases := []struct {
-		name string
-		rec  *models.EmailOTP
-		code string
-		want OTPCheck
-	}{
-		{"correct", fresh(), "424242", OTPOK},
-		{"wrong", fresh(), "424243", OTPWrong},
-		{"wrong length", fresh(), "4242", OTPWrong},
-		{"nil record", nil, "424242", OTPUnusable},
-		{"consumed (single use)", consumed, "424242", OTPUnusable},
-		{"expired at boundary", expired, "424242", OTPUnusable},
-		{"attempts exhausted", exhausted, "424242", OTPUnusable},
-		{"last attempt still allowed", almost, "424242", OTPOK},
-		{"purpose mismatch", otherPurpose, "424242", OTPWrong},
-	}
-	for _, tc := range cases {
-		if got := CheckOTP(tc.rec, pepper, tc.code, now); got != tc.want {
-			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
-func TestCooldownRemaining(t *testing.T) {
-	now := time.Now()
-	if d := CooldownRemaining(time.Time{}, now); d != 0 {
-		t.Errorf("zero time should have no cooldown, got %v", d)
-	}
-	if d := CooldownRemaining(now.Add(-10*time.Second), now); d != 50*time.Second {
-		t.Errorf("expected 50s, got %v", d)
-	}
-	if d := CooldownRemaining(now.Add(-61*time.Second), now); d != 0 {
-		t.Errorf("expected 0, got %v", d)
-	}
-}
-
 func TestAccessTokens(t *testing.T) {
 	secret := []byte(strings.Repeat("s", 32))
 	iss := NewTokenIssuer(secret, "test", 15*time.Minute)
 	uid := uuid.New()
 	now := time.Now()
-	tok, err := iss.Issue(uid, true, now)
+	tok, err := iss.Issue(uid, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	claims, err := iss.Parse(tok)
-	if err != nil || claims.Subject != uid.String() || !claims.Verified {
+	if err != nil || claims.Subject != uid.String() {
 		t.Fatalf("parse failed: %v %+v", err, claims)
 	}
 
-	expired, _ := iss.Issue(uid, true, now.Add(-time.Hour))
+	expired, _ := iss.Issue(uid, now.Add(-time.Hour))
 	if _, err := iss.Parse(expired); err == nil {
 		t.Error("expired token accepted")
 	}

@@ -1,4 +1,4 @@
-// Command api runs the PeakChat API server.
+// Command api runs the Horizon Valley API server.
 //
 //	api            start the HTTP server (runs migrations first if MIGRATE_ON_START=true)
 //	api serve      same as above
@@ -22,7 +22,6 @@ import (
 	"github.com/ai-code-101/rag-backend/api/internal/database"
 	"github.com/ai-code-101/rag-backend/api/internal/httpapi"
 	"github.com/ai-code-101/rag-backend/api/internal/logger"
-	"github.com/ai-code-101/rag-backend/api/internal/mail"
 	"github.com/ai-code-101/rag-backend/api/internal/migrate"
 	"github.com/ai-code-101/rag-backend/api/internal/ragclient"
 	"github.com/ai-code-101/rag-backend/api/internal/ratelimit"
@@ -79,18 +78,6 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	sqlDB, _ := db.DB()
 	defer sqlDB.Close()
 
-	var sender mail.Sender
-	switch cfg.MailDriver {
-	case "smtp":
-		sender = &mail.SMTPSender{
-			Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUser, Password: cfg.SMTPPass,
-			From: cfg.SMTPFrom, FromName: cfg.MailFromName,
-		}
-	default:
-		sender = mail.LogSender{Log: log}
-	}
-	mailQueue := mail.NewQueue(sender, log, cfg.MailWorkers, 1000)
-
 	var limiter ratelimit.Limiter = ratelimit.NewMemory()
 	if cfg.RedisURL != "" {
 		rl, err := ratelimit.NewRedis(cfg.RedisURL)
@@ -116,8 +103,8 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 
 	authSvc, err := auth.NewService(auth.Options{
 		DB: db, Hasher: auth.NewHasher(auth.DefaultArgon2, 4),
-		Tokens:    auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTIssuer, cfg.AccessTokenTTL),
-		OTPPepper: cfg.OTPPepper, Mailer: mailQueue, AppName: cfg.AppName, RefreshTTL: cfg.RefreshTokenTTL, Log: log,
+		Tokens:     auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTIssuer, cfg.AccessTokenTTL),
+		RefreshTTL: cfg.RefreshTokenTTL, Log: log,
 	})
 	if err != nil {
 		return err
@@ -165,9 +152,6 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("http shutdown", "error", err)
-	}
-	if err := mailQueue.Close(shutdownCtx); err != nil {
-		log.Error("mail queue drain", "error", err)
 	}
 	return nil
 }

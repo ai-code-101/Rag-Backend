@@ -76,7 +76,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             await pool.close()
 
     app = FastAPI(
-        title="PeakChat RAG (internal)",
+        title="Horizon Valley RAG (internal)",
         lifespan=lifespan,
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None,

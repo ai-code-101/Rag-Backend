@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     rag_internal_token: str = Field(min_length=24)
 
     # Embeddings
-    embedding_provider: Literal["openai", "voyage", "hash"] = "openai"
+    embedding_provider: Literal["openai", "openrouter", "voyage", "hash"] = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
     embedding_batch_size: int = 96
@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     voyage_api_key: str = ""
     voyage_base_url: str = "https://api.voyageai.com/v1"
+
+    # OpenRouter (OpenAI-compatible gateway to many model vendors). Bots use it with an
+    # "openrouter:" model prefix; EMBEDDING_PROVIDER=openrouter uses it for embeddings.
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_site_url: str = ""  # optional HTTP-Referer for OpenRouter attribution
+    app_name: str = "Horizon Valley"  # sent as the OpenRouter app title
 
     # LLM
     llm_provider: Literal["auto", "fake"] = "auto"  # "fake" = deterministic offline answers (dev/tests)
@@ -90,6 +97,10 @@ class Settings(BaseSettings):
         if not 1 <= v <= 2000:
             raise ValueError("EMBEDDING_DIM must be between 1 and 2000 (HNSW limit)")
         return v
+
+    @property
+    def openrouter_headers(self) -> dict[str, str]:
+        return {"HTTP-Referer": self.openrouter_site_url, "X-Title": self.app_name}
 
     @property
     def is_production(self) -> bool:

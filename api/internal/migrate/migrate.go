@@ -22,7 +22,7 @@ import (
 var files embed.FS
 
 // advisoryLockKey is an arbitrary constant shared by every instance of this service.
-const advisoryLockKey int64 = 0x7065616b63686174 // "peakchat"
+const advisoryLockKey int64 = 0x686f72697a6f6e76 // "horizonv"
 
 type Migration struct {
 	Version string

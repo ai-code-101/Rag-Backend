@@ -2,7 +2,7 @@
 
 // Package integration runs an end-to-end test across both services:
 //
-//	signup → verify → create bot → upload document → rag worker ingests it → widget chat
+//	signup → create bot → upload document → rag worker ingests it → widget chat
 //
 // The API runs in-process; the rag service must already be running (see
 // scripts/integration.sh) against the same database and storage directory, configured
@@ -20,9 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"regexp"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +29,6 @@ import (
 	"github.com/ai-code-101/rag-backend/api/internal/config"
 	"github.com/ai-code-101/rag-backend/api/internal/database"
 	"github.com/ai-code-101/rag-backend/api/internal/httpapi"
-	pcmail "github.com/ai-code-101/rag-backend/api/internal/mail"
 	"github.com/ai-code-101/rag-backend/api/internal/ragclient"
 	"github.com/ai-code-101/rag-backend/api/internal/ratelimit"
 	"github.com/ai-code-101/rag-backend/api/internal/storage"
@@ -48,18 +45,6 @@ Our café on Main Street is open Monday to Saturday from 7am to 7pm. On Sundays 
 
 Every tenth coffee is free with the Acme loyalty card. The card is free and available at the counter.
 `
-
-type inbox struct {
-	mu  sync.Mutex
-	msg []pcmail.Message
-}
-
-func (i *inbox) Enqueue(m pcmail.Message) error {
-	i.mu.Lock()
-	i.msg = append(i.msg, m)
-	i.mu.Unlock()
-	return nil
-}
 
 func env(t *testing.T, k string) string {
 	v := os.Getenv(k)
@@ -79,16 +64,15 @@ func TestUploadIngestChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mail := &inbox{}
 	cfg := &config.Config{
-		Env: "test", WebOrigin: "http://localhost:3000", CookieName: "pc_rt", CookiePath: "/", CookieSameSite: "strict",
+		Env: "test", WebOrigin: "http://localhost:3000", CookieName: "hv_rt", CookiePath: "/", CookieSameSite: "strict",
 		MaxUploadBytes: 5 << 20, MaxTextBytes: 64 << 10, HistoryTurns: 6,
 		AllowedModels: []string{"claude-haiku-5-5"}, DefaultModel: "claude-haiku-5-5", MaxBotsPerUser: 5, MaxDocsPerBot: 50,
 	}
 	svc, err := auth.NewService(auth.Options{
 		DB: db, Hasher: auth.NewHasher(auth.DefaultArgon2, 2),
-		Tokens:    auth.NewTokenIssuer([]byte(strings.Repeat("i", 32)), "it", 15*time.Minute),
-		OTPPepper: []byte(strings.Repeat("o", 32)), Mailer: mail, AppName: "PeakChat", RefreshTTL: time.Hour, Log: testutil.Logger(),
+		Tokens:     auth.NewTokenIssuer([]byte(strings.Repeat("i", 32)), "it", 15*time.Minute),
+		RefreshTTL: time.Hour, Log: testutil.Logger(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -125,17 +109,11 @@ func TestUploadIngestChat(t *testing.T) {
 	}
 	js := func(v any) []byte { b, _ := json.Marshal(v); return b }
 
-	// 1. Sign up and verify with the emailed code.
+	// 1. Sign up (returns a session straight away).
 	email := "owner-" + time.Now().Format("150405.000") + "@example.com"
-	creds := map[string]string{"email": email, "password": "integration-pass1"}
-	if st, b := call("POST", "/v1/auth/signup", "", "application/json", js(creds), nil); st != 202 {
+	st, b := call("POST", "/v1/auth/signup", "", "application/json", js(map[string]string{"email": email, "password": "integration-pass1"}), nil)
+	if st != 201 {
 		t.Fatalf("signup %d %s", st, b)
-	}
-	code := regexp.MustCompile(`\b\d{6}\b`).FindString(mail.msg[len(mail.msg)-1].Text)
-	st, b := call("POST", "/v1/auth/verify-email", "", "application/json",
-		js(map[string]string{"email": email, "password": "integration-pass1", "code": code}), nil)
-	if st != 200 {
-		t.Fatalf("verify %d %s", st, b)
 	}
 	var sess struct {
 		AccessToken string `json:"access_token"`

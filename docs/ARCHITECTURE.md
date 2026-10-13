@@ -1,4 +1,4 @@
-# PeakChat — Architecture
+# Horizon Valley — Architecture
 
 Multi-tenant RAG chatbot platform. Customers sign up, create bots, upload
 knowledge, write instructions, customise a widget, and embed it on their site
@@ -58,8 +58,7 @@ Rag-Backend/
 │   │   ├── migrate/                  embedded, versioned SQL migrations, advisory-locked
 │   │   │   └── sql/0001_…sql
 │   │   ├── models/                   GORM models (pgvector-go for embeddings)
-│   │   ├── auth/                     argon2id, OTP, JWT, refresh-token rotation, service
-│   │   ├── mail/                     Sender interface, SMTP + log senders, async queue, templates
+│   │   ├── auth/                     argon2id, JWT, refresh-token rotation, service
 │   │   ├── ratelimit/                Limiter interface, in-memory + Redis implementations
 │   │   ├── storage/                  ObjectStore interface, GCS + local implementations
 │   │   ├── ragclient/                HTTP client for the internal rag service (SSE aware)
@@ -77,9 +76,9 @@ Rag-Backend/
 │   │   ├── cache.py                  LRU + optional Redis
 │   │   ├── storage.py                GCS / local object reader
 │   │   ├── ingestion/                extractors, safe URL fetcher, chunker, worker
-│   │   ├── embeddings/               provider interface: openai-compatible, voyage, hash (dev)
+│   │   ├── embeddings/               provider interface: openrouter, openai-compatible, voyage, hash (dev)
 │   │   ├── retrieval/                hybrid search (vector + FTS, RRF)
-│   │   ├── llm/                      provider interface: anthropic, openai-compatible, fake (dev)
+│   │   ├── llm/                      provider interface: openrouter, anthropic, openai-compatible, fake (dev)
 │   │   ├── prompt.py                 system prompt + history budget
 │   │   └── routes/                   /internal/* endpoints
 │   ├── tests/
@@ -91,7 +90,7 @@ Rag-Backend/
 Rag-Frontend/
 ├── web/                              Next.js (App Router, TS, Tailwind)
 │   ├── app/
-│   │   ├── (auth)/login, signup, verify, forgot-password, reset-password
+│   │   ├── (app)/login, signup
 │   │   ├── dashboard/                bot list, create
 │   │   ├── dashboard/bots/[id]/      knowledge | instructions | widget | test tabs
 │   │   ├── widget/[publicKey]/       chat UI rendered inside the iframe
@@ -115,8 +114,7 @@ lock (safe when several Cloud Run instances boot at once), and recorded in
 migration time. Changing it later means a new migration plus a re-embed.
 
 ```
-users ─┬─< email_otps
-       ├─< refresh_tokens          (family_id groups a rotation chain)
+users ─┬─< refresh_tokens          (family_id groups a rotation chain)
        └─< bots ─┬── widget_configs (1:1)
                  ├─< documents ──< document_chunks
                  ├─< conversations ──< messages
@@ -125,8 +123,7 @@ users ─┬─< email_otps
 
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| `users` | `id uuid`, `email` (unique, lower-cased), `password_hash`, `email_verified`, timestamps | argon2id PHC string |
-| `email_otps` | `user_id`, `code_hash`, `purpose` (`verify_email`/`login`/`reset_password`), `expires_at`, `attempts`, `consumed_at`, `created_at` | HMAC-SHA256 with a server pepper; index `(user_id, purpose, created_at desc)` |
+| `users` | `id uuid`, `email` (unique, lower-cased), `password_hash`, timestamps | argon2id PHC string |
 | `refresh_tokens` | `user_id`, `family_id`, `token_hash` (unique), `expires_at`, `revoked_at`, `replaced_by`, `user_agent`, `ip` | SHA-256 of a 256-bit random token; reuse ⇒ revoke family |
 | `bots` | `id`, `owner_id`, `name`, `public_key` (unique), `system_instructions`, `fallback_message`, `model`, `temperature`, `allowed_origins text[]`, `knowledge_version`, timestamps | `knowledge_version` keys the answer cache |
 | `widget_configs` | `bot_id` (pk), `theme`, `content`, `behavior`, `features` (jsonb), `config_version` | version used as ETag |
@@ -145,21 +142,18 @@ in sync, and the rag service only inserts `content`, `metadata` and `embedding`.
 
 ## 4. Authentication
 
-* Signup → argon2id hash → `verify_email` OTP mailed → `202 verification_required`.
-  The same response comes back for an existing email, so the endpoint can't be
-  used to find out which emails have accounts.
-* Login with an unverified email: correct password ⇒ new OTP, `verification_required`, no tokens.
-  Unknown email still runs one argon2id hash so the timing matches.
-* OTP: 6 digits from `crypto/rand`, 10 min TTL, 5 attempts, 60 s resend
-  cooldown, single use; issuing a code consumes any outstanding code of the
-  same purpose.
+* Signup → argon2id hash → account created and signed in (`201` with tokens). There is
+  no email verification; an address that is already registered gets `409`.
+  (Migration `0004` removed the earlier OTP table and `email_verified` column.)
+* Login: wrong password and unknown email return the same `401`; an unknown email still
+  runs one argon2id hash so the timing matches.
 * Tokens: HS256 JWT access token (15 min, held in memory by the dashboard) +
   opaque refresh token (30 days) in an `httpOnly; Secure; SameSite=Strict`
   cookie scoped to `/api/v1/auth`. Every refresh rotates. Presenting an already
   rotated token outside a 15-second race window revokes the whole family.
 * The dashboard calls the API through a same-origin Next.js proxy route (`/api/*`),
   so the refresh cookie is first-party everywhere, including on `*.run.app`. A readable
-  `pc_has_session=1` hint cookie (no secret) lets the dashboard skip the refresh call for
+  `hv_has_session=1` hint cookie (no secret) lets the dashboard skip the refresh call for
   visitors who have no session.
 * Rate limits (per IP and per email) on every auth route. Bot/document/config
   queries always include `owner_id = <jwt sub>`; cross-tenant IDs return 404.

@@ -1,5 +1,5 @@
 [project]
-name = "peakchat-rag"
+name = "horizon-valley-rag"
 version = "1.0.0"
 description = "Internal RAG service: ingestion, hybrid retrieval and LLM streaming"
 requires-python = ">=3.12"

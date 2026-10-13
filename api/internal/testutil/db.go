@@ -37,7 +37,7 @@ func NewDB(t testing.TB) (*gorm.DB, string) {
 	ctx := context.Background()
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
-	name := "pc_test_" + hex.EncodeToString(b)
+	name := "hv_test_" + hex.EncodeToString(b)
 
 	admin, err := pgx.Connect(ctx, base)
 	if err != nil {

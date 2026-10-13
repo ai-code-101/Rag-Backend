@@ -59,10 +59,11 @@ async def _post_with_retry(client: httpx.AsyncClient, url: str, payload: dict, h
 class OpenAIEmbedder:
     """Any OpenAI-compatible /embeddings endpoint (OpenAI, Azure-compatible gateways, Ollama, …)."""
 
-    def __init__(self, api_key: str, base_url: str, model: str, dim: int, batch_size: int):
+    def __init__(self, api_key: str, base_url: str, model: str, dim: int, batch_size: int, extra_headers: dict[str, str] | None = None):
         self.model, self.dim, self.batch_size = model, dim, batch_size
         self._url = base_url.rstrip("/") + "/embeddings"
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._headers.update({k: v for k, v in (extra_headers or {}).items() if v})
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
 
     async def embed(self, texts: list[str], input_type: InputType) -> list[list[float]]:
@@ -70,7 +71,7 @@ class OpenAIEmbedder:
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
             payload: dict = {"model": self.model, "input": batch}
-            if self.model.startswith("text-embedding-3"):
+            if "text-embedding-3" in self.model:  # also matches OpenRouter's "openai/text-embedding-3-small"
                 payload["dimensions"] = self.dim  # Matryoshka truncation: smaller index, same model
             data = await _post_with_retry(self._client, self._url, payload, self._headers)
             vectors = [d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"])]
@@ -192,6 +193,9 @@ def build_embedder(settings, cache: TieredCache) -> CachedEmbedder:
     if settings.embedding_provider == "openai":
         inner: Embedder = OpenAIEmbedder(settings.openai_api_key, settings.openai_base_url, settings.embedding_model,
                                          settings.embedding_dim, settings.embedding_batch_size)
+    elif settings.embedding_provider == "openrouter":
+        inner = OpenAIEmbedder(settings.openrouter_api_key, settings.openrouter_base_url, settings.embedding_model,
+                               settings.embedding_dim, settings.embedding_batch_size, extra_headers=settings.openrouter_headers)
     elif settings.embedding_provider == "voyage":
         inner = VoyageEmbedder(settings.voyage_api_key, settings.voyage_base_url, settings.embedding_model,
                                settings.embedding_dim, settings.embedding_batch_size)

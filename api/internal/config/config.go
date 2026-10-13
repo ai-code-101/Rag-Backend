@@ -33,23 +33,12 @@ type Config struct {
 	JWTIssuer       string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
-	OTPPepper       []byte
 
 	CookieName     string
 	CookiePath     string
 	CookieDomain   string
 	CookieSecure   bool
 	CookieSameSite string
-
-	MailDriver   string // smtp | log
-	SMTPHost     string
-	SMTPPort     int
-	SMTPUser     string
-	SMTPPass     string
-	SMTPFrom     string
-	MailFromName string
-	MailWorkers  int
-	AppName      string
 
 	RedisURL string
 
@@ -89,23 +78,13 @@ func Load() (*Config, error) {
 		WebOrigin:       strings.TrimRight(getEnv("WEB_ORIGIN", "http://localhost:3000"), "/"),
 		CORSOrigins:     getList("CORS_ORIGINS", nil),
 		JWTSecret:       []byte(os.Getenv("JWT_SECRET")),
-		JWTIssuer:       getEnv("JWT_ISSUER", "peakchat-api"),
+		JWTIssuer:       getEnv("JWT_ISSUER", "horizon-valley-api"),
 		AccessTokenTTL:  getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL: getDuration("REFRESH_TOKEN_TTL", 30*24*time.Hour),
-		OTPPepper:       []byte(os.Getenv("OTP_PEPPER")),
 		CookiePath:      getEnv("COOKIE_PATH", "/api/v1/auth"),
 		CookieDomain:    os.Getenv("COOKIE_DOMAIN"),
 		CookieSecure:    getBool("COOKIE_SECURE", true),
 		CookieSameSite:  strings.ToLower(getEnv("COOKIE_SAMESITE", "strict")),
-		MailDriver:      getEnv("MAIL_DRIVER", "smtp"),
-		SMTPHost:        getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:        getInt("SMTP_PORT", 587),
-		SMTPUser:        os.Getenv("SMTP_USER"),
-		SMTPPass:        os.Getenv("SMTP_PASS"),
-		SMTPFrom:        os.Getenv("SMTP_FROM"),
-		MailFromName:    getEnv("MAIL_FROM_NAME", "PeakChat"),
-		MailWorkers:     getInt("MAIL_WORKERS", 2),
-		AppName:         getEnv("APP_NAME", "PeakChat"),
 		RedisURL:        os.Getenv("REDIS_URL"),
 		StorageDriver:   getEnv("STORAGE_DRIVER", "local"),
 		GCSBucket:       os.Getenv("GCS_BUCKET"),
@@ -117,18 +96,16 @@ func Load() (*Config, error) {
 		RAGTimeout:      getDuration("RAG_TIMEOUT", 120*time.Second),
 		RAGIDTokenAud:   os.Getenv("RAG_ID_TOKEN_AUDIENCE"),
 		HistoryTurns:    getInt("CHAT_HISTORY_TURNS", 6),
-		AllowedModels:   getList("ALLOWED_MODELS", []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}),
-		DefaultModel:    getEnv("DEFAULT_MODEL", "claude-opus-5-5"),
-		MaxBotsPerUser:  getInt("MAX_BOTS_PER_USER", 20),
-		MaxDocsPerBot:   getInt("MAX_DOCS_PER_BOT", 500),
+		// Model ids are "<provider>:<model>" (openrouter:, openai:) or bare claude-* for Anthropic.
+		AllowedModels:  getList("ALLOWED_MODELS", []string{"openrouter:openai/gpt-4o-mini"}),
+		DefaultModel:   getEnv("DEFAULT_MODEL", "openrouter:openai/gpt-4o-mini"),
+		MaxBotsPerUser: getInt("MAX_BOTS_PER_USER", 20),
+		MaxDocsPerBot:  getInt("MAX_DOCS_PER_BOT", 500),
 	}
 	if c.CookieSecure {
-		c.CookieName = getEnv("COOKIE_NAME", "__Secure-pc_rt")
+		c.CookieName = getEnv("COOKIE_NAME", "__Secure-hv_rt")
 	} else {
-		c.CookieName = getEnv("COOKIE_NAME", "pc_rt")
-	}
-	if c.SMTPFrom == "" {
-		c.SMTPFrom = c.SMTPUser
+		c.CookieName = getEnv("COOKIE_NAME", "hv_rt")
 	}
 	return c, c.validate()
 }
@@ -141,26 +118,11 @@ func (c *Config) validate() error {
 	if len(c.JWTSecret) < 32 {
 		errs = append(errs, errors.New("JWT_SECRET must be at least 32 bytes"))
 	}
-	if len(c.OTPPepper) < 32 {
-		errs = append(errs, errors.New("OTP_PEPPER must be at least 32 bytes"))
-	}
 	if c.RAGToken == "" || len(c.RAGToken) < 24 {
 		errs = append(errs, errors.New("RAG_INTERNAL_TOKEN must be at least 24 characters"))
 	}
 	if c.EmbeddingDim <= 0 || c.EmbeddingDim > 2000 {
 		errs = append(errs, errors.New("EMBEDDING_DIM must be between 1 and 2000 (HNSW limit)"))
-	}
-	switch c.MailDriver {
-	case "smtp":
-		if c.SMTPUser == "" || c.SMTPPass == "" {
-			errs = append(errs, errors.New("SMTP_USER and SMTP_PASS are required when MAIL_DRIVER=smtp"))
-		}
-	case "log":
-		if c.IsProduction() {
-			errs = append(errs, errors.New("MAIL_DRIVER=log is not allowed in production"))
-		}
-	default:
-		errs = append(errs, fmt.Errorf("unknown MAIL_DRIVER %q", c.MailDriver))
 	}
 	switch c.StorageDriver {
 	case "gcs":

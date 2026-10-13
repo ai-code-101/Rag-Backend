@@ -1,4 +1,4 @@
-# PeakChat — multi-tenant RAG chatbot platform (backend)
+# Horizon Valley — multi-tenant RAG chatbot platform (backend)
 
 Customers sign up, create bots, upload knowledge (PDF, DOCX, TXT, Markdown, URLs, pasted
 text), write custom instructions, style a widget and embed it on their site with one
@@ -20,13 +20,13 @@ git clone https://github.com/ai-code-101/Rag-Backend.git
 git clone https://github.com/ai-code-101/Rag-Frontend.git   # side by side
 cd Rag-Backend
 cp .env.example .env
-# Fill in JWT_SECRET, OTP_PEPPER and RAG_INTERNAL_TOKEN (openssl rand -base64 48), then either
-#  • real providers: ANTHROPIC_API_KEY, OPENAI_API_KEY (embeddings), SMTP_PASS, or
-#  • fully offline: EMBEDDING_PROVIDER=hash LLM_PROVIDER=fake MAIL_DRIVER=log
+# Fill in JWT_SECRET and RAG_INTERNAL_TOKEN (openssl rand -base64 48), then either
+#  • OpenRouter: OPENROUTER_API_KEY (chat + embeddings), or
+#  • fully offline: EMBEDDING_PROVIDER=hash LLM_PROVIDER=fake
 docker compose --profile frontend up --build
 ```
 
-* Dashboard: http://localhost:3000 (sign up; with `MAIL_DRIVER=log` the code is printed in `docker compose logs api`)
+* Dashboard: http://localhost:3000 (sign up and you're signed in straight away)
 * API: http://localhost:8080 (`/healthz`, `/readyz`)
 * The rag service is reachable only on the compose network, never from the host.
 
@@ -36,7 +36,7 @@ Prerequisites: Go 1.26, Python 3.12+, PostgreSQL 16 with pgvector ≥ 0.5 (0.8+ 
 
 ```bash
 # database
-createdb peakchat && psql peakchat -c 'CREATE EXTENSION IF NOT EXISTS vector'
+createdb horizonvalley && psql horizonvalley -c 'CREATE EXTENSION IF NOT EXISTS vector'
 
 # api
 cd api
@@ -48,7 +48,7 @@ go run ./cmd/api             # :8080
 cd ../rag
 python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 set -a; . ../.env; set +a
-DATABASE_URL=postgresql://peakchat:peakchat@localhost:5432/peakchat \
+DATABASE_URL=postgresql://horizonvalley:horizonvalley@localhost:5432/horizonvalley \
   .venv/bin/uvicorn --factory app.main:app_factory --port 8000 --reload
 ```
 
@@ -68,14 +68,14 @@ by GORM (via `pgvector-go`). The rag service never runs DDL. At startup it check
 that `document_chunks.embedding` has the dimension it is configured for, and refuses to
 start if they differ.
 
-To add a migration, create the next numbered file (e.g. `0004_add_x.sql`). Never edit
+To add a migration, create the next numbered file (e.g. `0005_add_x.sql`). Never edit
 an applied one. `{{EMBEDDING_DIM}}` is substituted from `EMBEDDING_DIM`.
 
 ## Tests
 
 ```bash
-make test-api   # Go unit + DB tests (auth/OTP, refresh rotation, tenancy, widget, uploads, SSE)
-make test-rag   # Python unit + DB tests (chunking, extraction, SSRF, retrieval, worker, API)
+make test-api   # Go unit + DB tests (auth, refresh rotation, tenancy, widget, uploads, SSE)
+make test-rag   # Python unit + DB tests (chunking, extraction, SSRF, retrieval, worker, API, OpenRouter)
 make e2e        # upload → ingest → chat across both services (no external APIs)
 ```
 
@@ -96,33 +96,40 @@ variable. The most important ones:
 | `EMBEDDING_DIM` | both | vector dimension; must match the embedding model and both services |
 | `RAG_INTERNAL_TOKEN` | both | bearer token the API uses to call the rag service |
 | `STORAGE_DRIVER`, `GCS_BUCKET` | both | `gcs` in production, `local` only for development |
-| `JWT_SECRET`, `OTP_PEPPER` | api | ≥ 32 random bytes each |
+| `JWT_SECRET` | api | ≥ 32 random bytes |
 | `WEB_ORIGIN` | api | public origin of the web app (dashboard + widget iframe) |
 | `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_PATH` | api | refresh-cookie attributes |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | api | Gmail SMTP (`smtp.gmail.com:587`, STARTTLS, App Password) |
-| `ALLOWED_MODELS`, `DEFAULT_MODEL` | api | models a bot may use; `openai:<model>` selects an OpenAI-compatible provider |
+| `ALLOWED_MODELS`, `DEFAULT_MODEL` | api | models a bot may use, as `<provider>:<model>` (see below) |
 | `REDIS_URL` | both | optional; shared rate limits (api) and caches (rag) across instances |
-| `ANTHROPIC_API_KEY` | rag | Claude models |
-| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `OPENAI_API_KEY`, `VOYAGE_API_KEY` | rag | embeddings |
+| `OPENROUTER_API_KEY` | rag | OpenRouter (chat and embeddings) |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | rag | direct Anthropic / OpenAI access (optional, for later) |
+| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `VOYAGE_API_KEY` | rag | embeddings |
 | `RETRIEVAL_TOP_K`, `RETRIEVAL_MIN_SIMILARITY` | rag | retrieval tuning |
 
-### Gmail setup
+### Models and providers
 
-1. Turn on 2-Step Verification for `roadyridge@gmail.com`.
-2. Google Account → Security → App passwords → create one for "Mail".
-3. Put the 16-character password in `SMTP_PASS` (in Secret Manager in production).
+A bot's model id says which provider serves it:
 
-Mail is sent by a background worker pool with retries, so requests never wait on SMTP.
-To switch providers (SendGrid, SES, …) implement `mail.Sender` (one method) and select
-it in `cmd/api/main.go`.
+| Model id | Provider | Key |
+| --- | --- | --- |
+| `openrouter:<vendor>/<model>`, e.g. `openrouter:openai/gpt-4o-mini` | [OpenRouter](https://openrouter.ai) | `OPENROUTER_API_KEY` |
+| `claude-*`, e.g. `claude-haiku-5-5` | Anthropic API | `ANTHROPIC_API_KEY` |
+| `openai:<model>`, e.g. `openai:gpt-4.1-mini` | OpenAI, or any OpenAI-compatible `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
+
+List the ones bots may pick in `ALLOWED_MODELS` (comma separated) and set `DEFAULT_MODEL`.
+To add Anthropic or OpenAI later, set the key and append the model ids; no code changes
+are needed. Embeddings are configured separately (`EMBEDDING_PROVIDER=openrouter` with
+`EMBEDDING_MODEL=openai/text-embedding-3-small` and `EMBEDDING_DIM=1536` by default).
+
+Accounts are created with email and password and are usable immediately. There is no
+email verification or password-reset email.
 
 ## API overview
 
 Dashboard (Bearer access token; refresh token in an `httpOnly` cookie):
 
 ```
-POST /v1/auth/signup | login | verify-email | otp/resend | login/code | login/code/verify
-POST /v1/auth/password/forgot | password/reset | refresh | logout
+POST /v1/auth/signup | login | refresh | logout
 GET  /v1/me, /v1/models
 GET|POST /v1/bots          GET|PATCH|DELETE /v1/bots/:id      POST /v1/bots/:id/rotate-key
 GET|PUT  /v1/bots/:id/widget
@@ -146,14 +153,14 @@ All three services are stateless containers. Uploaded files go to GCS; state liv
 Postgres (and optionally Memorystore Redis).
 
 ```bash
-PROJECT=my-project REGION=europe-west1 REPO=peakchat
+PROJECT=my-project REGION=europe-west1 REPO=horizonvalley
 gcloud artifacts repositories create $REPO --repository-format=docker --location=$REGION
 
 # 1. Database: Cloud SQL for PostgreSQL 16 (pgvector is available as an extension).
-#    Create database "peakchat" and a user; the first migration runs CREATE EXTENSION vector.
+#    Create database "horizonvalley" and a user; the first migration runs CREATE EXTENSION vector.
 # 2. Bucket for uploads (uniform access, no public access; add a lifecycle rule if desired).
-gcloud storage buckets create gs://$PROJECT-peakchat-uploads --location=$REGION --uniform-bucket-level-access
-# 3. Secrets: JWT_SECRET, OTP_PEPPER, RAG_INTERNAL_TOKEN, SMTP_PASS, ANTHROPIC_API_KEY, OPENAI_API_KEY, DATABASE_URL(s)
+gcloud storage buckets create gs://$PROJECT-horizon-valley-uploads --location=$REGION --uniform-bucket-level-access
+# 3. Secrets: JWT_SECRET, RAG_INTERNAL_TOKEN, OPENROUTER_API_KEY, DATABASE_URL(s)
 printf '%s' "$(openssl rand -base64 48)" | gcloud secrets create JWT_SECRET --data-file=-
 
 # 4. Build and push
@@ -161,22 +168,22 @@ gcloud builds submit api --tag $REGION-docker.pkg.dev/$PROJECT/$REPO/api
 gcloud builds submit rag --tag $REGION-docker.pkg.dev/$PROJECT/$REPO/rag
 
 # 5. rag: internal ingress only; CPU always allocated so the ingestion worker keeps running.
-gcloud run deploy peakchat-rag --image $REGION-docker.pkg.dev/$PROJECT/$REPO/rag --region $REGION \
+gcloud run deploy horizon-valley-rag --image $REGION-docker.pkg.dev/$PROJECT/$REPO/rag --region $REGION \
   --ingress internal --no-allow-unauthenticated --no-cpu-throttling --min-instances 1 \
-  --set-env-vars APP_ENV=production,STORAGE_DRIVER=gcs,GCS_BUCKET=$PROJECT-peakchat-uploads,EMBEDDING_DIM=1536 \
-  --set-secrets DATABASE_URL=RAG_DATABASE_URL:latest,RAG_INTERNAL_TOKEN=RAG_INTERNAL_TOKEN:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest \
-  --add-cloudsql-instances $PROJECT:$REGION:peakchat-db
+  --set-env-vars APP_ENV=production,STORAGE_DRIVER=gcs,GCS_BUCKET=$PROJECT-horizon-valley-uploads,EMBEDDING_DIM=1536,EMBEDDING_PROVIDER=openrouter,EMBEDDING_MODEL=openai/text-embedding-3-small \
+  --set-secrets DATABASE_URL=RAG_DATABASE_URL:latest,RAG_INTERNAL_TOKEN=RAG_INTERNAL_TOKEN:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest \
+  --add-cloudsql-instances $PROJECT:$REGION:horizon-valley-db
 
 # 6. Migrations as a job (or keep MIGRATE_ON_START=true)
-gcloud run jobs deploy peakchat-migrate --image $REGION-docker.pkg.dev/$PROJECT/$REPO/api --args migrate ... && \
-  gcloud run jobs execute peakchat-migrate --wait
+gcloud run jobs deploy horizon-valley-migrate --image $REGION-docker.pkg.dev/$PROJECT/$REPO/api --args migrate ... && \
+  gcloud run jobs execute horizon-valley-migrate --wait
 
 # 7. api: public; egress through the VPC so it can reach the internal rag service.
-gcloud run deploy peakchat-api --image $REGION-docker.pkg.dev/$PROJECT/$REPO/api --region $REGION \
+gcloud run deploy horizon-valley-api --image $REGION-docker.pkg.dev/$PROJECT/$REPO/api --region $REGION \
   --allow-unauthenticated --network default --subnet default --vpc-egress all-traffic \
-  --set-env-vars APP_ENV=production,STORAGE_DRIVER=gcs,GCS_BUCKET=$PROJECT-peakchat-uploads,WEB_ORIGIN=https://app.example.com,RAG_URL=https://peakchat-rag-xxxx.run.app,RAG_ID_TOKEN_AUDIENCE=https://peakchat-rag-xxxx.run.app,COOKIE_SECURE=true,MIGRATE_ON_START=false,SMTP_USER=roadyridge@gmail.com,SMTP_FROM=roadyridge@gmail.com \
-  --set-secrets DATABASE_URL=API_DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,OTP_PEPPER=OTP_PEPPER:latest,RAG_INTERNAL_TOKEN=RAG_INTERNAL_TOKEN:latest,SMTP_PASS=SMTP_PASS:latest \
-  --add-cloudsql-instances $PROJECT:$REGION:peakchat-db
+  --set-env-vars APP_ENV=production,STORAGE_DRIVER=gcs,GCS_BUCKET=$PROJECT-horizon-valley-uploads,WEB_ORIGIN=https://app.example.com,RAG_URL=https://horizon-valley-rag-xxxx.run.app,RAG_ID_TOKEN_AUDIENCE=https://horizon-valley-rag-xxxx.run.app,COOKIE_SECURE=true,MIGRATE_ON_START=false \
+  --set-secrets DATABASE_URL=API_DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,RAG_INTERNAL_TOKEN=RAG_INTERNAL_TOKEN:latest \
+  --add-cloudsql-instances $PROJECT:$REGION:horizon-valley-db
 ```
 
 Notes:
@@ -193,7 +200,7 @@ Notes:
   shared. Without it each instance enforces its own limits.
 * **Connection pools:** keep `DB_MAX_OPEN_CONNS × api instances + DB_POOL_MAX × rag instances`
   below the Cloud SQL connection limit.
-* **Graceful shutdown:** the api drains HTTP and the mail queue on SIGTERM (25 s). rag stops
+* **Graceful shutdown:** the api drains in-flight HTTP requests on SIGTERM (25 s). rag stops
   its workers, and any document still in flight is picked up again after its lease expires.
 
 ## Efficiency choices

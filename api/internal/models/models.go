@@ -11,38 +11,12 @@ import (
 )
 
 type User struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	Email         string    `gorm:"not null;uniqueIndex"`
-	PasswordHash  string    `gorm:"not null"`
-	EmailVerified bool      `gorm:"not null;default:false"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	Email        string    `gorm:"not null;uniqueIndex"`
+	PasswordHash string    `gorm:"not null"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
-
-type OTPPurpose string
-
-const (
-	PurposeVerifyEmail   OTPPurpose = "verify_email"
-	PurposeLogin         OTPPurpose = "login"
-	PurposeResetPassword OTPPurpose = "reset_password"
-)
-
-func (p OTPPurpose) Valid() bool {
-	return p == PurposeVerifyEmail || p == PurposeLogin || p == PurposeResetPassword
-}
-
-type EmailOTP struct {
-	ID         uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	UserID     uuid.UUID  `gorm:"type:uuid;not null"`
-	CodeHash   string     `gorm:"not null"`
-	Purpose    OTPPurpose `gorm:"not null"`
-	ExpiresAt  time.Time  `gorm:"not null"`
-	Attempts   int        `gorm:"not null;default:0"`
-	ConsumedAt *time.Time
-	CreatedAt  time.Time
-}
-
-func (EmailOTP) TableName() string { return "email_otps" }
 
 type RefreshToken struct {
 	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`

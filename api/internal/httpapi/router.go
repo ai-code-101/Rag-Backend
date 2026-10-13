@@ -75,12 +75,6 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	a := dash.Group("/auth", maxBody(16<<10), h.limit("auth-ip", ruleAuthIP, byIP))
 	a.POST("/signup", h.signup)
 	a.POST("/login", h.login)
-	a.POST("/verify-email", h.verifyEmail)
-	a.POST("/otp/resend", h.resendOTP)
-	a.POST("/login/code", h.requestLoginCode)
-	a.POST("/login/code/verify", h.loginWithCode)
-	a.POST("/password/forgot", h.forgotPassword)
-	a.POST("/password/reset", h.resetPassword)
 	a.POST("/refresh", h.limit("refresh-ip", ruleRefreshIP, byIP), h.csrfGuard, h.refresh)
 	a.POST("/logout", h.csrfGuard, h.logout)
 

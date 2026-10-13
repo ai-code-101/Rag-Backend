@@ -12,12 +12,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const accessAudience = "peakchat-dashboard"
+const accessAudience = "horizon-valley-dashboard"
 
 var ErrInvalidToken = errors.New("invalid token")
 
 type AccessClaims struct {
-	Verified bool `json:"ev"`
 	jwt.RegisteredClaims
 }
 
@@ -33,9 +32,8 @@ func NewTokenIssuer(secret []byte, issuer string, ttl time.Duration) *TokenIssue
 
 func (t *TokenIssuer) TTL() time.Duration { return t.ttl }
 
-func (t *TokenIssuer) Issue(userID uuid.UUID, verified bool, now time.Time) (string, error) {
+func (t *TokenIssuer) Issue(userID uuid.UUID, now time.Time) (string, error) {
 	claims := AccessClaims{
-		Verified: verified,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			Issuer:    t.issuer,
