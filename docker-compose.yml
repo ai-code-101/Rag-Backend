@@ -23,7 +23,8 @@ services:
       POSTGRES_USER: horizonvalley
       POSTGRES_PASSWORD: horizonvalley
       POSTGRES_DB: horizonvalley
-    ports: ["5432:5432"]
+    # Host port is configurable in case a local Postgres already uses 5432 (DB_PORT=5433 in .env).
+    ports: ["${DB_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U horizonvalley -d horizonvalley"]
